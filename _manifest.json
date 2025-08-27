@@ -4,7 +4,8 @@
   "version": "1.5.0",
   "description": "支持游戏模式的海龟汤题目生成和互动。",
   "author": {
-    "name": "Unreal"
+    "name": "Unreal",
+    "url": "https://github.com/svila-ylym"
   },
   "license": "MIT",
   "keywords": ["海龟汤", "推理游戏", "AI", "娱乐"],
@@ -22,4 +23,5 @@
       }
     ]
   }
+
 }
