@@ -9,7 +9,7 @@
   },
   "license": "MIT",
   "keywords": ["海龟汤", "推理游戏", "AI", "娱乐"],
-  "categories": ["娱乐"],
+  "categories": ["Entertainment & Interaction"],
   "host_application": {
     "min_version": "0.10.0"
   },
@@ -25,3 +25,4 @@
   }
 
 }
+
