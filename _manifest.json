@@ -8,6 +8,7 @@
     "url": "https://github.com/svila-ylym"
   },
   "license": "MIT",
+  "repository_url": "https://github.com/svila-ylym/My_Fucked_turtle_soup-Maimbot",
   "keywords": ["海龟汤", "推理游戏", "AI", "娱乐"],
   "categories": ["Entertainment & Interaction"],
   "host_application": {
@@ -25,4 +26,5 @@
   }
 
 }
+
 
