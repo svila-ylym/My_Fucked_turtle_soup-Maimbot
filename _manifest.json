@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "name": "海龟汤",
+  "version": "1.5.0",
+  "description": "支持游戏模式的海龟汤题目生成和互动。",
+  "author": {
+    "name": "Unreal"
+  },
+  "license": "MIT",
+  "keywords": ["海龟汤", "推理游戏", "AI", "娱乐"],
+  "categories": ["娱乐"],
+  "host_application": {
+    "min_version": "0.10.0"
+  },
+  "plugin_info": {
+    "plugin_type": "general",
+    "components": [
+      {
+        "type": "command",
+        "name": "HaiTurtleSoupCommand",
+        "description": "处理 /hgt 命令，生成海龟汤题目或进行游戏互动。用法: /hgt [问题|提示|整理线索|猜谜|退出|帮助|汤面|揭秘]"
+      }
+    ]
+  }
+}
