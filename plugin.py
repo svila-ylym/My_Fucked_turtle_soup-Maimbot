@@ -21,6 +21,9 @@ game_states = {} # {group_id: {"current_question": "", "current_answer": "", "hi
 # --- 全局本地题目存储 ---
 local_turtle_soups = [] # 存储从 turtle.json 加载的题目 [{name, question, answer}, ...]
 
+# --- 全局模型选择存储 (新增) ---
+model_selections = {} # {stream_id: "selected_model_name"}
+
 # --- 插件定义 ---
 @register_plugin
 class HaiTurtleSoupPlugin(BasePlugin):
@@ -28,7 +31,7 @@ class HaiTurtleSoupPlugin(BasePlugin):
 
     plugin_name = "My_Fucked_turtle_soup"
     plugin_description = "支持游戏模式的海龟汤题目生成和互动。"
-    plugin_version = "1.5.0" # 更新版本号
+    plugin_version = "1.6.2" # 更新版本号
     plugin_author = "Unreal"
     enable_plugin = True
 
@@ -42,6 +45,7 @@ class HaiTurtleSoupPlugin(BasePlugin):
         "llm": "LLM API 配置",
         "anti_abuse": "反滥用配置" # 新增配置节描述
     }
+    # --- 更新配置 Schema ---
     config_schema = {
         "plugin": {
             "enabled": ConfigField(
@@ -51,14 +55,14 @@ class HaiTurtleSoupPlugin(BasePlugin):
             ),
             "config_version": ConfigField( # 添加配置版本
                 type=str,
-                default="1.5.0", # 更新配置版本
+                default="1.6.2", # 更新配置版本
                 description="配置文件版本"
             ),
         },
         "llm": {
             "api_url": ConfigField(
                 type=str,
-                default="https://api.siliconflow.cn/v1/chat/completions", # 修正了末尾多余的空格
+                default="https://api.siliconflow.cn/v1/chat/completions",
                 description="LLM API 地址 (OpenAI格式)"
             ),
             "api_key": ConfigField(
@@ -66,14 +70,26 @@ class HaiTurtleSoupPlugin(BasePlugin):
                 default="YOUR_SILICONFLOW_OR_OTHER_KEY", # 请务必填写你的API Key
                 description="LLM API 密钥"
             ),
+            # --- 保留默认模型字段 ---
             "model": ConfigField(
                 type=str,
-                default="gpt-3.5-turbo", # 请替换为实际模型名
-                description="使用的LLM模型名称"
+                default="deepseek-ai/DeepSeek-V3", # 更新默认模型
+                description="使用的LLM模型名称 (默认模型)"
+            ),
+            # --- 新增模型列表字段 ---
+            "models": ConfigField(
+                type=list,
+                default=[
+                    "deepseek-ai/DeepSeek-V3",
+                    "Qwen/Qwen2-72B-Instruct",
+                    "01-ai/Yi-1.5-9B-Chat-16K",
+                    "THUDM/glm-4-9b-chat"
+                ],
+                description="可用的LLM模型列表"
             ),
             "temperature": ConfigField(
                 type=float,
-                default=0.7, # 为了增加创意性，设为0.7
+                default=0.7,
                 description="LLM 生成文本的随机性 (0.0-1.0)"
             )
         },
@@ -107,7 +123,7 @@ def _load_json_data(filename: str) -> dict:
             return {}
     return {}
 
-def _save_json_data(filename: str,  dict):
+def _save_json_data(filename: str, data: dict): # 修复参数名称
     """保存JSON数据文件"""
     file_path = os.path.join(PLUGIN_DIR, filename)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -124,7 +140,7 @@ def _load_local_turtle_soups():
     global local_turtle_soups
     local_turtle_soups = [] # 清空旧数据
     file_path = os.path.join(PLUGIN_DIR, "turtle.json")
-    
+
     if not os.path.exists(file_path):
         print(f"本地题目文件 {file_path} 不存在。")
         return False, f"本地题目文件 {file_path} 不存在。"
@@ -132,7 +148,7 @@ def _load_local_turtle_soups():
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
         if not isinstance(data, list):
              error_msg = f"{file_path} 文件内容必须是一个数组。"
              print(error_msg)
@@ -143,7 +159,7 @@ def _load_local_turtle_soups():
             if not isinstance(item, dict):
                 print(f"警告：{file_path} 第 {i+1} 项不是对象，已跳过。")
                 continue
-            
+
             name = item.get("name")
             question = item.get("question")
             answer = item.get("answer")
@@ -151,13 +167,13 @@ def _load_local_turtle_soups():
             if not all(isinstance(field, str) and field for field in [name, question, answer]):
                 print(f"警告：{file_path} 第 {i+1} 项缺少 'name', 'question' 或 'answer' 字段，或字段为空，已跳过。")
                 continue
-            
+
             valid_soups.append({
                 "name": name.strip(),
                 "question": question.strip(),
                 "answer": answer.strip()
             })
-        
+
         local_turtle_soups = valid_soups
         success_msg = f"成功从 {file_path} 加载了 {len(local_turtle_soups)} 个本地海龟汤题目。"
         print(success_msg)
@@ -178,9 +194,9 @@ class HaiTurtleSoupCommand(BaseCommand):
     """处理 /hgt 命令"""
 
     command_name = "HaiTurtleSoupCommand"
-    command_description = "生成海龟汤题目或进行游戏互动。用法: /hgt [问题|提示|整理线索|猜谜|退出|帮助|汤面|揭秘|载入|本地|列表]"
-    # 更新后的正则表达式，支持 /hgt 本地 <序号>
-    command_pattern = r"^/hgt(?:\s+(?P<action>(?:提示|问题|整理线索|猜谜|退出|帮助|汤面|揭秘|载入|本地|列表)))(?:\s+(?P<rest>.+))?$"
+    command_description = "生成海龟汤题目或进行游戏互动。用法: /hgt [问题|提示|整理线索|猜谜|退出|帮助|汤面|揭秘|载入|本地|列表|模型]"
+    # 更新后的正则表达式，支持 /hgt 本地 <序号> 和 /hgt 模型 <参数>
+    command_pattern = r"^/hgt\s+(?P<action>\S+)(?:\s+(?P<rest>.+))?$"
     command_help = (
         "海龟汤游戏：\n"
         "/hgt 问题 - 生成AI题目\n"
@@ -195,12 +211,15 @@ class HaiTurtleSoupCommand(BaseCommand):
         "/hgt 载入 - 从 turtle.json 载入本地题目\n"
         "/hgt 列表 - 查看已载入的本地题目列表\n"
         "/hgt 本地 - 随机使用一个本地题目开始游戏\n"
-        "/hgt 本地 <序号> - 使用指定序号的本地题目开始游戏"
+        "/hgt 本地 <序号> - 使用指定序号的本地题目开始游戏\n"
+        "/hgt 模型 - 列出可用模型\n"
+        "/hgt 模型 <序号> - 切换模型"
     )
     command_examples = [
         "/hgt 问题", "/hgt 问题 为什么海龟不喝水？", "/hgt 提示", "/hgt 整理线索",
         "/hgt 猜谜 海龟是用海龟做的", "/hgt 退出", "/hgt 帮助", "/hgt 汤面",
-        "/hgt 揭秘", "/hgt 载入", "/hgt 列表", "/hgt 本地", "/hgt 本地 1"
+        "/hgt 揭秘", "/hgt 载入", "/hgt 列表", "/hgt 本地", "/hgt 本地 1",
+        "/hgt 模型", "/hgt 模型 2"
     ]
     intercept_message = True # 确保拦截消息，防止转发
 
@@ -208,16 +227,16 @@ class HaiTurtleSoupCommand(BaseCommand):
         """执行命令逻辑"""
         # --- 安全处理匹配结果 ---
         matched_groups = self.matched_groups if self.matched_groups is not None else {}
-        
+
         # 安全获取 action 和 rest
         action = ""
         rest_input = ""
-        
+
         # 检查是否匹配成功
         if matched_groups:
             action = matched_groups.get("action", "") if matched_groups.get("action") is not None else ""
             rest_input = matched_groups.get("rest", "") if matched_groups.get("rest") is not None else ""
-        
+
         # 确保字符串安全处理
         action = str(action).strip()
         rest_input = str(rest_input).strip()
@@ -258,7 +277,19 @@ class HaiTurtleSoupCommand(BaseCommand):
         # --- 获取LLM配置 (仅在需要时使用) ---
         api_url = self.get_config("llm.api_url", "").strip()
         api_key = self.get_config("llm.api_key", "").strip()
-        model = self.get_config("llm.model", "gpt-3.5-turbo")
+        # --- 获取模型列表 ---
+        available_models = self.get_config("llm.models", ["deepseek-ai/DeepSeek-V3"])
+
+        # --- 获取当前聊天上下文选中的模型 (修改后) ---
+        # 优先从全局 model_selections 字典获取，回退到配置文件默认值
+        current_model = model_selections.get(stream_id) # 使用 stream_id 查找
+        if not current_model or current_model not in available_models:
+            # 如果没有为当前上下文设置模型，或设置的模型无效，则使用 llm.model 配置项的默认值
+            current_model = self.get_config("llm.model", "deepseek-ai/DeepSeek-V3")
+            # 再次检查默认模型是否在可用列表中，不在则使用列表第一个
+            if current_model not in available_models:
+                 current_model = available_models[0] if available_models else "deepseek-ai/DeepSeek-V3"
+
         temperature = self.get_config("llm.temperature", 0.7)
 
         # --- 根据动作执行不同逻辑 ---
@@ -277,9 +308,45 @@ class HaiTurtleSoupCommand(BaseCommand):
             game_states[group_id] = game_state
 
         # --- 处理不同动作 ---
-        
+
+        # --- 新增功能：模型管理 ---
+        if action == "模型":
+            if not rest_input:
+                # 列出可用模型
+                model_list_text = "🤖 **可用模型列表**\n"
+                for i, model_name in enumerate(available_models, 1):
+                    # 检查当前上下文的模型
+                    marker = " (当前)" if model_name == current_model else ""
+                    model_list_text += f"{i}. {model_name}{marker}\n"
+                try:
+                    await self.send_text(model_list_text)
+                except Exception as e:
+                    print(f"发送模型列表失败: {e}")
+                return True, "已发送模型列表", True
+            else:
+                # 切换模型
+                try:
+                    model_index = int(rest_input) - 1
+                    if 0 <= model_index < len(available_models):
+                        selected_model = available_models[model_index]
+                        # --- 保存用户选择到全局字典 (修改后) ---
+                        # 使用 stream_id 作为键存储模型选择
+                        model_selections[stream_id] = selected_model
+                        try:
+                            # 修改提示信息，说明是存储在内存中
+                            await self.send_text(f"✅ 已在当前会话 ({stream_id}) 切换到模型: {selected_model} (设置存储于内存)")
+                        except Exception as e:
+                            print(f"发送模型切换确认失败: {e}")
+                        return True, f"已切换模型到 {selected_model}", True
+                    else:
+                        await self.send_text(f"❌ 序号 {rest_input} 超出范围。请输入 1 到 {len(available_models)} 之间的数字。")
+                        return False, "模型序号超出范围", True
+                except ValueError:
+                    await self.send_text(f"❌ '{rest_input}' 不是一个有效的序号。请输入一个数字。")
+                    return False, "模型序号无效", True
+
         # --- 新增功能：载入本地题目 ---
-        if action == "载入":
+        elif action == "载入":
             success, message = _load_local_turtle_soups()
             try:
                 if success:
@@ -298,11 +365,11 @@ class HaiTurtleSoupCommand(BaseCommand):
                  except Exception as e:
                      print(f"发送本地题目列表失败: {e}")
                  return False, "本地题目库为空", True
-            
+
             list_text = "📋 **已载入的本地海龟汤题目列表**\n"
             for i, soup in enumerate(local_turtle_soups, 1):
                 list_text += f"{i}. {soup['name']}\n"
-            
+
             try:
                 await self.send_text(list_text)
             except Exception as e:
@@ -318,7 +385,7 @@ class HaiTurtleSoupCommand(BaseCommand):
                  except Exception as e:
                      print(f"发送本地游戏错误消息失败: {e}")
                  return False, "本地题目库为空", True
-             
+
              selected_soup = None
              if rest_input: # 如果提供了序号
                  try:
@@ -333,11 +400,12 @@ class HaiTurtleSoupCommand(BaseCommand):
                      return False, "本地题目序号无效", True
              else: # 没有提供序号，随机选择
                  selected_soup = random.choice(local_turtle_soups)
-             
+
              if selected_soup:
                  # 调用修改后的 _start_new_game 来启动本地游戏
+                 # --- 传递当前选中的模型 ---
                  return await self._start_new_game(
-                     group_id, api_url, api_key, model, temperature, stream_id,
+                     group_id, api_url, api_key, current_model, temperature, stream_id,
                      local_question=selected_soup["question"],
                      local_answer=selected_soup["answer"],
                      local_name=selected_soup["name"]
@@ -351,7 +419,8 @@ class HaiTurtleSoupCommand(BaseCommand):
             # 用户提出问题
             if not game_state.get("game_active", False):
                 # 如果没有正在进行的游戏，先生成一个新题目 (AI生成)
-                return await self._start_new_game(group_id, api_url, api_key, model, temperature, stream_id)
+                # --- 传递当前选中的模型 ---
+                return await self._start_new_game(group_id, api_url, api_key, current_model, temperature, stream_id)
             else:
                 # 检查当前是否有题目
                 if not game_state.get("current_question", ""):
@@ -376,7 +445,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
 不要添加任何解释或额外文字。
                 """
-                llm_response = await self._call_llm_api(prompt, api_url, api_key, model, temperature)
+                # --- 传递当前选中的模型 ---
+                llm_response = await self._call_llm_api(prompt, api_url, api_key, current_model, temperature)
                 if not llm_response:
                     try:
                         await self.send_text("❌ 调用LLM API失败，请稍后再试。")
@@ -391,15 +461,15 @@ class HaiTurtleSoupCommand(BaseCommand):
                 # 根据LLM响应决定如何回应 (修改为新格式)
                 formatted_question = rest_input.replace("\n", " ").strip() # 简单处理换行
                 if cleaned_response == "是":
-                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\nคำตอบ：✅ 是"
+                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\n答案：✅ 是"
                 elif cleaned_response == "不是":
-                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\nคำตอบ：❌ 否"
+                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\n答案：❌ 否"
                 elif cleaned_response == "无关":
-                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\nคำตอบ：❓ 无关"
+                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\n答案：❓ 无关"
                 elif cleaned_response == "是也不是":
-                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\nคำตอบ：🔄 是也不是"
+                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\n答案：🔄 是也不是"
                 else:
-                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\nคำตอบ：❓ 无法判断。LLM返回: '{llm_response}'"
+                    reply_text = f"🔍 **问题判断结果**\n问题：{formatted_question}\n答案：❓ 无法判断。LLM返回: '{llm_response}'"
 
                 try:
                     await self.send_text(reply_text)
@@ -434,7 +504,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
 请给出一个不直接透露答案的提示，用简短的句子。不要包含任何解释或答案。
             """
-            llm_response = await self._call_llm_api(prompt, api_url, api_key, model, temperature)
+            # --- 传递当前选中的模型 ---
+            llm_response = await self._call_llm_api(prompt, api_url, api_key, current_model, temperature)
             if not llm_response:
                 try:
                     await self.send_text("❌ 调用LLM API失败，请稍后再试。")
@@ -475,7 +546,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
 请列出关键线索，用简洁的要点形式呈现。不要包含答案。
             """
-            llm_response = await self._call_llm_api(prompt, api_url, api_key, model, temperature)
+            # --- 传递当前选中的模型 ---
+            llm_response = await self._call_llm_api(prompt, api_url, api_key, current_model, temperature)
             if not llm_response:
                 try:
                     await self.send_text("❌ 调用LLM API失败，请稍后再试。")
@@ -521,7 +593,7 @@ class HaiTurtleSoupCommand(BaseCommand):
 
             # --- 从配置文件读取违禁词列表 ---
             ban_history_from_config = self.get_config("anti_abuse.ban_history", [])
-            if rest_input in ban_history_from_config:
+            if any(banned.lower() in rest_input.lower() for banned in ban_history_from_config):
                 try:
                     await self.send_text("❌ 你他妈的还玩注入？")
                 except Exception as e:
@@ -542,7 +614,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
 不要添加任何解释或额外文字。
             """
-            llm_response = await self._call_llm_api(prompt, api_url, api_key, model, temperature)
+            # --- 传递当前选中的模型 ---
+            llm_response = await self._call_llm_api(prompt, api_url, api_key, current_model, temperature)
             if not llm_response:
                 try:
                     await self.send_text("❌ 调用LLM API失败，请稍后再试。")
@@ -597,12 +670,12 @@ class HaiTurtleSoupCommand(BaseCommand):
                 except Exception as e:
                     print(f"发送错误消息失败: {e}")
                 return False, "无游戏", True
-            
+
             # 重置游戏状态
             game_state["game_active"] = False
             game_state["game_over"] = True
             game_states[group_id] = game_state # 保存更新后的状态
-            
+
             try:
                 await self.send_text("🚪 **游戏已退出。**\n你可以随时使用 `/hgt 问题` 重新开始游戏。")
             except Exception as e:
@@ -627,7 +700,9 @@ class HaiTurtleSoupCommand(BaseCommand):
                 "🔸 `/hgt 载入` - 从 `turtle.json` 载入本地题目\n"
                 "🔸 `/hgt 列表` - 查看已载入的本地题目列表\n"
                 "🔸 `/hgt 本地` - 随机使用一个已载入的本地题目开始游戏\n"
-                "🔸 `/hgt 本地 <序号>` - 使用指定序号的已载入本地题目开始游戏\n\n"
+                "🔸 `/hgt 本地 <序号>` - 使用指定序号的已载入本地题目开始游戏\n"
+                "🔸 `/hgt 模型` - 列出可用模型\n"
+                "🔸 `/hgt 模型 <序号>` - 切换模型\n\n"
                 "💡 **游戏提示**\n"
                 "🔹 使用 `/hgt 问题` 或 `/hgt 本地` 开始游戏\n"
                 "🔹 通过提问和提示推理汤底\n"
@@ -682,7 +757,7 @@ class HaiTurtleSoupCommand(BaseCommand):
 
             # 获取汤底
             answer = game_state.get('current_answer', '无答案')
-            
+
             # 结束游戏
             game_state["game_over"] = True
             game_state["game_active"] = False # 也标记为非活跃，表示游戏完全结束
@@ -703,7 +778,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
         else:
             # 默认情况：生成一个新的AI海龟汤题目
-            return await self._start_new_game(group_id, api_url, api_key, model, temperature, stream_id)
+            # --- 传递当前上下文选中的模型 ---
+            return await self._start_new_game(group_id, api_url, api_key, current_model, temperature, stream_id)
 
         # 为了防止意外情况，添加一个默认返回
         # 但理想情况下，上面的 if/elif 应该覆盖所有情况
@@ -717,8 +793,8 @@ class HaiTurtleSoupCommand(BaseCommand):
 
     # --- 辅助方法：开始新游戏 (修改以支持本地题目) ---
     async def _start_new_game(
-        self, group_id: str, api_url: str, api_key: str, model: str, 
-        temperature: float, stream_id: str, 
+        self, group_id: str, api_url: str, api_key: str, model: str,
+        temperature: float, stream_id: str,
         local_question: str = None, local_answer: str = None, local_name: str = None
     ) -> Tuple[bool, Optional[str], bool]:
         """
@@ -755,13 +831,14 @@ class HaiTurtleSoupCommand(BaseCommand):
 汤底：我去参加外公的葬礼，同行的还有比我大两岁的姐姐，我和她完捉迷藏我没有找到她没想到她躲在了纸做的房子里，当纸房子被点燃，我看见姐姐在跳舞，我对妈说，妈姐姐在那房子里面跳舞，因为姐姐被烧死了，我一直记得这个事。
 
 3.【插进来】
-汤面：他迅速的插进来，又迅速的拔出去。反反复复，我流血了。他满头大汗，露出了笑容。“啊，好舒服”
+汤面：他迅速的插进来，又迅速的拔出去。反反复复，我流血了。他满头大汗，露出了笑容。"啊，好舒服"
 汤底：他是护士，在给我打针，针头打进血管里面会回血，因此说明成功了。流汗是因为反反复复了好几次。
 
 4.【无罪】
 汤面："她是自愿的！"尸体无暴力痕迹，凶手被判无罪。"我是无罪的！"尸体有暴力痕迹，凶手也被判无罪。
 汤底：第一幕：女儿为救他人（如器官移植）自愿牺牲，所以"自愿"且无暴力痕迹，他人无罪。第二幕：父亲无法接受女儿死亡真相，杀害了被判无罪的人，但法医发现此人所受暴力伤害与父亲行为不符（或父亲伪造证据），真相是女儿死于意外，父亲为报复误杀他人，故父亲也称自己"无罪"，但法律上仍有罪。
             """
+            # --- 传递当前选中的模型 ---
             llm_response = await self._call_llm_api(prompt, api_url, api_key, model, temperature)
             if not llm_response:
                 try:
@@ -795,6 +872,7 @@ class HaiTurtleSoupCommand(BaseCommand):
 汤面："她是自愿的！"尸体无暴力痕迹，凶手被判无罪。"我是无罪的！"尸体有暴力痕迹，凶手也被判无罪。
 汤底：第一幕：女儿为救他人（如器官移植）自愿牺牲，所以"自愿"且无暴力痕迹，他人无罪。第二幕：父亲无法接受女儿死亡真相，杀害了被判无罪的人，但法医发现此人所受暴力伤害与父亲行为不符（或父亲伪造证据），真相是女儿死于意外，父亲为报复误杀他人，故父亲也称自己"无罪"，但法律上仍有罪。
             """
+            # --- 传递当前选中的模型 ---
             answer_response = await self._call_llm_api(answer_prompt, api_url, api_key, model, temperature)
             if not answer_response:
                 try:
@@ -805,7 +883,7 @@ class HaiTurtleSoupCommand(BaseCommand):
             answer = answer_response.strip()
             print(f"[LLM Answer Response] {answer}")
             # --- AI生成逻辑结束 ---
-        
+
         # --- 通用游戏状态保存和消息发送逻辑 ---
         game_states[group_id] = {
             "current_question": question,
@@ -846,7 +924,7 @@ class HaiTurtleSoupCommand(BaseCommand):
             "Authorization": f"Bearer {api_key}"
         }
         payload = {
-            "model": model,
+            "model": model, # --- 使用传入的模型名称 ---
             "messages": [
                 {"role": "system", "content": "你是一个专业的海龟汤故事生成器和解释者。"},
                 {"role": "user", "content": prompt}

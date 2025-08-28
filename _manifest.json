@@ -1,16 +1,14 @@
 {
   "manifest_version": 1,
   "name": "海龟汤",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "支持游戏模式的海龟汤题目生成和互动。",
   "author": {
-    "name": "Unreal",
-    "url": "https://github.com/svila-ylym"
+    "name": "Unreal"
   },
   "license": "MIT",
-  "repository_url": "https://github.com/svila-ylym/My_Fucked_turtle_soup-Maimbot",
   "keywords": ["海龟汤", "推理游戏", "AI", "娱乐"],
-  "categories": ["Entertainment & Interaction"],
+  "categories": ["娱乐"],
   "host_application": {
     "min_version": "0.10.0"
   },
@@ -24,7 +22,4 @@
       }
     ]
   }
-
 }
-
-
