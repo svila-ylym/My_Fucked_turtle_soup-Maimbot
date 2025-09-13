@@ -62,12 +62,12 @@ class HaiTurtleSoupPlugin(BasePlugin):
         "llm": {
             "api_url": ConfigField(
                 type=str,
-                default="https://api.siliconflow.cn/v1/chat/completions",
+                default="http://rinkoai.com/v1/chat/completions",
                 description="LLM API 地址 (OpenAI格式)"
             ),
             "api_key": ConfigField(
                 type=str,
-                default="YOUR_SILICONFLOW_OR_OTHER_KEY", # 请务必填写你的API Key
+                default="YOUR_RINKO_OR_OTHER_KEY", # 请务必填写你的API Key
                 description="LLM API 密钥"
             ),
             # --- 保留默认模型字段 ---
